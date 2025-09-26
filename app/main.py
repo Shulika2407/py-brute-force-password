@@ -1,6 +1,9 @@
+import multiprocessing
+import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, wait
 from hashlib import sha256
-
+from typing import Dict
 
 PASSWORDS_TO_BRUTE_FORCE = [
     "b4061a4bcfe1a2cbf78286f3fab2fb578266d1bd16c414c650c5ac04dfc696e1",
@@ -15,18 +18,57 @@ PASSWORDS_TO_BRUTE_FORCE = [
     "e5f3ff26aa8075ce7513552a9af1882b4fbc2a47a3525000f6eb887ab9622207",
 ]
 
+PASSWORD_SET = set(PASSWORDS_TO_BRUTE_FORCE)
+
+PASSWORD_MAP: Dict[str, int] = {
+    hash_val: index for index, hash_val in enumerate(PASSWORDS_TO_BRUTE_FORCE)
+}
 
 def sha256_hash_str(to_hash: str) -> str:
     return sha256(to_hash.encode("utf-8")).hexdigest()
 
 
-def brute_force_password() -> None:
-    pass
+def brute_force_password(start_range: int,
+                         end_range: int,
+                         ) -> None:
+
+    password_count = 0
+    for i in range(start_range, end_range):
+
+        password_candidate = str(i).zfill(8)
+        candidate_hash = sha256_hash_str(password_candidate)
+
+        if candidate_hash in PASSWORD_SET:
+            hash_index = PASSWORD_MAP[candidate_hash]
+            print(f"Password found: index: {hash_index}, {password_candidate}, hash: {candidate_hash}")
+            password_count += 1
+
+            if password_count == len(PASSWORD_SET):
+                exit(30000)
+
+
+def main_multiprocess_executor() -> None:
+    total_passwords = 10 ** 8
+    num_processes = multiprocessing.cpu_count()
+    chunk_size = total_passwords // num_processes
+
+    futures = []
+    with ProcessPoolExecutor(max_workers=num_processes) as executor:
+
+        for index, i in enumerate(range(num_processes)):
+            start = i * chunk_size
+
+            end = (i + 1) * chunk_size if i < num_processes - 1 else total_passwords
+
+            futures.append(executor.submit(brute_force_password, start, end))
+
+    wait(futures)
 
 
 if __name__ == "__main__":
     start_time = time.perf_counter()
-    brute_force_password()
+    # brute_force_password()
+    main_multiprocess_executor()
     end_time = time.perf_counter()
 
     print("Elapsed:", end_time - start_time)
