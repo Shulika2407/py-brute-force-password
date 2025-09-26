@@ -1,9 +1,9 @@
 import multiprocessing
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, wait
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from hashlib import sha256
-from typing import Dict
+from typing import Dict, List, Tuple, Set
 
 PASSWORDS_TO_BRUTE_FORCE = [
     "b4061a4bcfe1a2cbf78286f3fab2fb578266d1bd16c414c650c5ac04dfc696e1",
@@ -30,9 +30,9 @@ def sha256_hash_str(to_hash: str) -> str:
 
 def brute_force_password(start_range: int,
                          end_range: int,
-                         ) -> None:
+                         ) -> List[Tuple[str, str, int]]:
 
-    password_count = 0
+    found_results: List[Tuple[str, str, int]] = []
     for i in range(start_range, end_range):
 
         password_candidate = str(i).zfill(8)
@@ -40,11 +40,11 @@ def brute_force_password(start_range: int,
 
         if candidate_hash in PASSWORD_SET:
             hash_index = PASSWORD_MAP[candidate_hash]
-            print(f"Password found: index: {hash_index}, {password_candidate}, hash: {candidate_hash}")
-            password_count += 1
+            found_results.append((password_candidate, candidate_hash, hash_index))
 
-            if password_count == len(PASSWORD_SET):
-                exit(30000)
+    return found_results
+            # print(f"Password found: index: {hash_index}, {password_candidate}, hash: {candidate_hash}")
+
 
 
 def main_multiprocess_executor() -> None:
@@ -52,17 +52,41 @@ def main_multiprocess_executor() -> None:
     num_processes = multiprocessing.cpu_count()
     chunk_size = total_passwords // num_processes
 
+    found_unique_passwords: Set[str] = set()
     futures = []
     with ProcessPoolExecutor(max_workers=num_processes) as executor:
 
-        for index, i in enumerate(range(num_processes)):
+        for i in range(num_processes):
             start = i * chunk_size
 
             end = (i + 1) * chunk_size if i < num_processes - 1 else total_passwords
 
             futures.append(executor.submit(brute_force_password, start, end))
 
-    wait(futures)
+        for future in as_completed(futures):
+
+            try:
+                results = future.result()
+
+                for password, candidate_hash, hash_index in results:
+                    if password not in found_unique_passwords:
+                        found_unique_passwords.add(password)
+
+                        print(f"Password found: index: {hash_index}, {password}, hash: {candidate_hash}")
+
+                if len(found_unique_passwords) == len(PASSWORD_SET):
+
+                    print("ALL 10 PASSWORDS FOUND. Stop...")
+
+                    for f in futures:
+                        f.cancel()
+
+                    break
+
+            except Exception as e:
+                print(f"Task execution error: {e}", file=sys.stderr)
+
+        return found_unique_passwords
 
 
 if __name__ == "__main__":
