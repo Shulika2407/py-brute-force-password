@@ -3,7 +3,7 @@ import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from hashlib import sha256
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Tuple, Set, Any
 
 PASSWORDS_TO_BRUTE_FORCE = [
     "b4061a4bcfe1a2cbf78286f3fab2fb578266d1bd16c414c650c5ac04dfc696e1",
@@ -30,10 +30,14 @@ def sha256_hash_str(to_hash: str) -> str:
 
 def brute_force_password(start_range: int,
                          end_range: int,
-                         ) -> List[Tuple[str, str, int]]:
+                         stop_event: Any) -> List[Tuple[str, str, int]]:
 
     found_results: List[Tuple[str, str, int]] = []
     for i in range(start_range, end_range):
+
+        if i % 10000 == 0 and stop_event.is_set():
+
+            return found_results
 
         password_candidate = str(i).zfill(8)
         candidate_hash = sha256_hash_str(password_candidate)
@@ -47,46 +51,50 @@ def brute_force_password(start_range: int,
 
 
 
-def main_multiprocess_executor() -> None:
+def main_multiprocess_executor() -> Set[str]:
     total_passwords = 10 ** 8
     num_processes = multiprocessing.cpu_count()
     chunk_size = total_passwords // num_processes
 
-    found_unique_passwords: Set[str] = set()
+    found_passwords_by_id: Dict[int, str] = {}
     futures = []
-    with ProcessPoolExecutor(max_workers=num_processes) as executor:
 
-        for i in range(num_processes):
-            start = i * chunk_size
+    with multiprocessing.Manager() as manager:
+        stop_event = manager.Event()
+        with ProcessPoolExecutor(max_workers=num_processes) as executor:
 
-            end = (i + 1) * chunk_size if i < num_processes - 1 else total_passwords
+            for i in range(num_processes):
+                start = i * chunk_size
 
-            futures.append(executor.submit(brute_force_password, start, end))
+                end = (i + 1) * chunk_size if i < num_processes - 1 else total_passwords
 
-        for future in as_completed(futures):
+                futures.append(executor.submit(brute_force_password, start, end, stop_event))
 
-            try:
-                results = future.result()
+            for future in as_completed(futures):
 
-                for password, candidate_hash, hash_index in results:
-                    if password not in found_unique_passwords:
-                        found_unique_passwords.add(password)
+                try:
+                    results = future.result()
 
-                        print(f"Password found: index: {hash_index}, {password}, hash: {candidate_hash}")
+                    for password, candidate_hash, hash_index in results:
+                        if hash_index not in found_passwords_by_id:
+                            found_passwords_by_id[hash_index] = password
 
-                if len(found_unique_passwords) == len(PASSWORD_SET):
+                            print(f"Password found: index: {hash_index}, {password}, hash: {candidate_hash}")
 
-                    print("ALL 10 PASSWORDS FOUND. Stop...")
+                    if len(found_passwords_by_id) == len(PASSWORD_SET):
 
-                    for f in futures:
-                        f.cancel()
+                        print("ALL 10 PASSWORDS FOUND. Stop...")
+                        stop_event.set()
 
-                    break
+                        for f in futures:
+                            f.cancel()
 
-            except Exception as e:
-                print(f"Task execution error: {e}", file=sys.stderr)
+                        break
 
-        return found_unique_passwords
+                except Exception as e:
+                    print(f"Task execution error: {e}", file=sys.stderr)
+
+            return found_passwords_by_id
 
 
 if __name__ == "__main__":
